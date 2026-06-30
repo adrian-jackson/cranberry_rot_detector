@@ -1,0 +1,18 @@
+# Model weights — distributed separately
+backend/models/*.pth
+backend/models/*.pkl
+backend/models/*.npy
+
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
+
+# Node
+frontend/node_modules/
+frontend/build/
+
+# OS
+.DS_Store
+Thumbs.db
