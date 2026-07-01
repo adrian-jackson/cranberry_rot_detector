@@ -1,0 +1,2 @@
+use to re-deploy modal_app: python -m modal deploy backend/modal_app.py
+backend is all in modal, but included in this package for future revisions.

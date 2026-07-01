@@ -12,8 +12,8 @@ from pathlib import Path
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install(
-        "torch==2.2.0",
-        "torchvision==0.17.0",
+        "torch==2.3.0",
+        "torchvision==0.18.0",
         extra_index_url="https://download.pytorch.org/whl/cu121",
     )
     .pip_install(
@@ -22,9 +22,10 @@ image = (
         "Pillow",
         "opencv-python-headless",   # headless — no display needed on server
         "numpy>=1.26,<2", 
-        "scikit-learn",
+        "scikit-learn==1.8.0",
         "huggingface-hub>=0.23.0",  
         "einops>=0.7.0",
+        "psutil",
         # SAM3 / Meta vision dependencies
         "fvcore",
         "omegaconf",
@@ -55,6 +56,11 @@ image = (
     .add_local_dir(
         "C:/Users/Adria/Documents/sam3",  # local path
         "/usr/local/sam3",                 # where it lands in the container
+    )
+    # Add BPE file into the assets folder SAM3 expects
+    .add_local_file(
+        "C:/Users/Adria/Documents/github/cranberry_algorithms/cranberry_rot_detector/backend/models/sam3_assets/bpe_simple_vocab_16e6.txt.gz",
+        "/usr/local/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz",
     )
     # Also bundle your pipeline.py so the container can import it
     .add_local_file("backend/pipeline.py", "/usr/local/pipeline.py")
@@ -87,8 +93,10 @@ class CranberryInspector:
 
         device = "cuda"
 
-        self.sam3 = load_sam3("/models/sam3_root", device=device)
+        self.clf = load_svm("/models/svm_clf.pkl")
+        self.sam3 = load_sam3("/usr/local/sam3", ckpt_path="/models/sam3_weights/sam3.pt", device=device)
         self.dino = load_dino("/models/backbone.pth", device=device)
+
         with open("/models/svm_clf.pkl", "rb") as f:
             self.clf = pickle.load(f)
 

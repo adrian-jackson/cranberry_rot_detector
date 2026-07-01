@@ -9,29 +9,6 @@
 # Then open http://localhost:3000 in your browser.
 
 services:
-
-  # ── FastAPI backend ───────────────────────────────────────────────────────
-  # Handles image uploads and forwards inference requests to Modal.
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      # Paste your Modal inference URL here after running `modal deploy`
-      - MODAL_INFERENCE_URL=${MODAL_INFERENCE_URL}
-    volumes:
-      # Model files are read from here at startup if running locally.
-      # Not needed when inference is on Modal — leave empty in that case.
-      - ./models:/app/models:ro
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
   # ── React frontend ────────────────────────────────────────────────────────
   frontend:
     build:
@@ -42,7 +19,7 @@ services:
     environment:
       # Points the frontend at the backend — do not change unless you
       # move the backend to a different host.
-      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_API_URL=https://adrian-jackson--cranberry-inspector-cranberryinspector-predict.modal.run/
     depends_on:
       - backend
     restart: unless-stopped

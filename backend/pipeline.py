@@ -78,6 +78,7 @@ CLASS_COLORS = {0: (255, 80, 80), 1: (80, 255, 80)}
 
 def load_sam3(sam3_root: str | Path,
               conf_thresh: float = SAM_CONF_THRESH,
+              ckpt_path = None,
               device: str = "cuda") -> Sam3Processor:
     """
     Loads the SAM3 image segmentation model.
@@ -97,7 +98,7 @@ def load_sam3(sam3_root: str | Path,
     if not bpe_path.exists():
         raise FileNotFoundError(f"SAM3 BPE file not found: {bpe_path}")
 
-    model     = build_sam3_image_model(bpe_path=bpe_path)
+    model     = build_sam3_image_model(bpe_path=bpe_path, checkpoint_path=ckpt_path)
     processor = Sam3Processor(model, confidence_threshold=conf_thresh)
     return processor
 
