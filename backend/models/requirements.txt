@@ -1,0 +1,22 @@
+# ── Web API ───────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9        # required by FastAPI for file upload handling
+
+# ── ML / vision ───────────────────────────────────────────────────────────
+torch>=2.2.0                   # install the CUDA build separately — see note below
+torchvision>=0.17.0
+Pillow>=10.3.0
+opencv-python>=4.9.0
+numpy>=1.26.0
+scikit-learn>=1.4.0            # SVM pipeline (StandardScaler + SVC)
+huggingface-hub>=0.23.0
+
+# ── SAM3 ──────────────────────────────────────────────────────────────────
+# sam3 is not on PyPI — install from source:
+#   pip install -e /path/to/sam3
+# or if published to a git repo:
+#   pip install git+https://github.com/yourname/sam3.git
+
+# ── Standard library (no install needed) ──────────────────────────────────
+# pathlib, pickle, os, io, base64 — all built-in
