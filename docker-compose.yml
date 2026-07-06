@@ -20,6 +20,4 @@ services:
       # Points the frontend at the backend — do not change unless you
       # move the backend to a different host.
       - REACT_APP_API_URL=https://adrian-jackson--cranberry-inspector-cranberryinspector-predict.modal.run/
-    depends_on:
-      - backend
     restart: unless-stopped

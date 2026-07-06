@@ -18,3 +18,5 @@ frontend/build/
 # OS
 .DS_Store
 Thumbs.db
+
+secret.dev.notes
