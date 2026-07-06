@@ -1,0 +1,31 @@
+{
+  "name": "cranberry_rot_detector",
+  "version": "1.0.0",
+  "description": "Automatically detects and classifies cranberries in photos as **ripe** or **rot**\r using SAM3 (segmentation) and DINOv2 (classification).",
+  "main": "index.js",
+"scripts": {
+  "dev": "vite",
+  "build": "vite build",
+  "test": "echo \"Error: no test specified\" && exit 1"
+},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adrian-jackson/cranberry_rot_detector.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/adrian-jackson/cranberry_rot_detector/issues"
+  },
+  "homepage": "https://github.com/adrian-jackson/cranberry_rot_detector#readme",
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.3",
+    "vite": "^8.1.3"
+  }
+}
