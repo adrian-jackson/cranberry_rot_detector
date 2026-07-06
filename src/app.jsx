@@ -32,7 +32,7 @@ export default function App() {
     try {
       const res  = await fetch(`${API}/predict`, { method: "POST", body: form });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Prediction failed");
+      if (!res.ok) throw new Error(data.error || "HTTP request failed");
       setResult(data);
     } catch (err) {
       setError(err.message);
