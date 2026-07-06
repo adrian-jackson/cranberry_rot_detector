@@ -8,4 +8,3 @@ export default defineConfig({
     outDir: 'dist',
   },
 })
-EOF
