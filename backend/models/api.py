@@ -25,6 +25,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
     allow_origins=["https://cranberry-rot-detector-677icdang-adrianjackson.vercel.app/"],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

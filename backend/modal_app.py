@@ -103,7 +103,7 @@ class CranberryInspector:
         self.device = device
         print("Models loaded.")
 
-    @modal.fastapi_endpoint(method="POST")
+    @modal.fastapi_endpoint(method="POST") #, path="/predict")
     async def predict(self, request):
         """
         Accepts a multipart form POST with an image file.

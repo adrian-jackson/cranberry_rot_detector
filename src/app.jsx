@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from "react";
 
 // Reads from environment variable set by Docker,
 // falls back to localhost for local development
-const API = import.meta.env.VITE_API_URL || "https://adrian-jackson--cranberry-inspector-cranberryinspector-predict.modal.run";
+const API = import.meta.env.VITE_API_URL || "https://adrian-jackson--cranberry-inspector-cranberryinspector-predict.modal.run"; 
 
 // Colour matches the backend overlay
 const CLASS_COLOR = { 0: "#ff5050", 1: "#50ff50" };
@@ -30,7 +30,7 @@ export default function App() {
     form.append("file", file);
 
     try {
-      const res  = await fetch(`${API}/predict`, { method: "POST", body: form });
+      const res  = await fetch(`${API}`, { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "HTTP request failed");
       setResult(data);
