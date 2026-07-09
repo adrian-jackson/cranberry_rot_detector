@@ -4,6 +4,7 @@
 
 import modal
 from pathlib import Path
+from fastapi import UploadFile, File
 
 # ── Define the cloud environment ──────────────────────────────────────────
 # This replaces requirements.txt + CUDA install entirely.
@@ -103,50 +104,53 @@ class CranberryInspector:
         self.device = device
         print("Models loaded.")
 
-    @modal.fastapi_endpoint(method="POST") #, path="/predict")
-    async def predict(self, request):
-        """
-        Accepts a multipart form POST with an image file.
-        Returns JSON with per-berry predictions and a base64 annotated image.
-        Identical contract to the local api.py endpoint.
-        """
-        import io, base64, cv2, numpy as np
-        from PIL import Image
-        from fastapi import Request
-        from pipeline import run_sam, run_dino, draw_predictions
+    from fastapi import UploadFile, File
 
-        form    = await request.form()
-        content = await form["file"].read()
-        image   = Image.open(io.BytesIO(content)).convert("RGB")
+@modal.fastapi_endpoint(method="POST")
+async def predict(self, file: UploadFile = File(...)):
+    """
+    Accepts a multipart form POST with an image file.
+    """
+    import io, base64, cv2
+    import numpy as np
+    from PIL import Image
+    from pipeline import run_sam, run_dino, draw_predictions
 
-        sam_output, image_resized = run_sam(self.sam3, image=image)
+    # Read uploaded file bytes
+    content = await file.read()
+    image   = Image.open(io.BytesIO(content)).convert("RGB")
 
-        if sam_output["masks"].shape[0] == 0:
-            return {"error": "No cranberries detected"}
+    sam_output, image_resized = run_sam(self.sam3, image=image)
 
-        predictions, _ = run_dino(
-            self.dino, self.clf, image_resized,
-            sam_output["masks"],
-            sam_output["boxes"],
-            sam_output["scores"],
-            device=self.device,
-        )
+    if sam_output["masks"].shape[0] == 0:
+        return {"error": "No cranberries detected"}
 
-        annotated = draw_predictions(image_resized, predictions, sam_output["masks"])
-        _, buf    = cv2.imencode(".png", cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
-        b64       = base64.b64encode(buf).decode()
+    predictions, _ = run_dino(
+        self.dino, self.clf, image_resized,
+        sam_output["masks"],
+        sam_output["boxes"],
+        sam_output["scores"],
+        device=self.device,
+    )
 
-        n_rot  = sum(1 for p in predictions if p["predicted_class"] == 0)
-        n_ripe = len(predictions) - n_rot
+    annotated = draw_predictions(image_resized, predictions, sam_output["masks"])
+    _, buf    = cv2.imencode(".png", cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
+    b64       = base64.b64encode(buf).decode()
 
-        return {
-            "annotated_image": b64,
-            "image_size":      list(image_resized.size),
-            "cranberries":     predictions,
-            "summary": {
-                "total":   len(predictions),
-                "n_rot":   n_rot,
-                "n_ripe":  n_ripe,
-                "pct_rot": round(n_rot / max(len(predictions), 1) * 100, 1),
-            }
+    n_rot  = sum(1 for p in predictions if p["predicted_class"] == 0)
+    n_ripe = len(predictions) - n_rot
+
+    return {
+        "annotated_image": b64,
+        "image_size":      list(image_resized.size),
+        "cranberries":     [
+            {**p, "all_class_probs": p["all_class_probs"].tolist()}
+            for p in predictions
+        ],
+        "summary": {
+            "total":   len(predictions),
+            "n_rot":   n_rot,
+            "n_ripe":  n_ripe,
+            "pct_rot": round(n_rot / max(len(predictions), 1) * 100, 1),
         }
+    }
