@@ -124,11 +124,12 @@ class CranberryInspector:
         async def predict(file: UploadFile = File(...)):
             content = await file.read()
             image   = Image.open(io.BytesIO(content)).convert("RGB")
+            cran_error = 0
 
             sam_output, image_resized = run_sam(self.sam3, image=image)
 
             if sam_output["masks"].shape[0] == 0:
-                return {"error": "No cranberries detected"}
+                cran_error = 1
 
             predictions, _ = run_dino(
                 self.dino, self.clf, image_resized,
@@ -146,6 +147,7 @@ class CranberryInspector:
             n_ripe = len(predictions) - n_rot
 
             return {
+                "error": cran_error,
                 "annotated_image": b64,
                 "image_size":      list(image_resized.size),
                 "cranberries":     predictions,   # already JSON-serialisable — all floats/ints/strings
