@@ -129,7 +129,7 @@ export default function App() {
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
-      <h1 style={styles.title}>Cranberry Rot Detector.</h1>
+      <h1 style={styles.title}>Cranberry Rot Detector</h1>
 
       {/* Controls row */}
       <div style={styles.controls}>
