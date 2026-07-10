@@ -148,11 +148,7 @@ class CranberryInspector:
             return {
                 "annotated_image": b64,
                 "image_size":      list(image_resized.size),
-                "cranberries":     [
-                    {**{k: v for k, v in p.items() if k != "all_class_probs"},
-                    "all_class_probs": p["all_class_probs"].tolist()}
-                    for p in predictions
-                ],
+                "cranberries":     predictions,   # already JSON-serialisable — all floats/ints/strings
                 "summary": {
                     "total":   len(predictions),
                     "n_rot":   n_rot,
