@@ -30,7 +30,7 @@ export default function App() {
     form.append("file", file);
 
     try {
-      const res  = await fetch(`${API}`, { method: "POST", body: form });
+      const res  = await fetch(`${API}/predict`, { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "HTTP request failed");
       setResult(data);
