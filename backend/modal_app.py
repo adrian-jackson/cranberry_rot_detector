@@ -103,61 +103,61 @@ class CranberryInspector:
         print("Models loaded.")
 
 
-        @modal.asgi_app()
-        def fastapi_app(self):
-            from fastapi import FastAPI, UploadFile, File
-            from fastapi.middleware.cors import CORSMiddleware
-            import io, base64, cv2
-            import numpy as np
-            from PIL import Image
-            from pipeline import run_sam, run_dino, draw_predictions
+    @modal.asgi_app()
+    def fastapi_app(self):
+        from fastapi import FastAPI, UploadFile, File
+        from fastapi.middleware.cors import CORSMiddleware
+        import io, base64, cv2
+        import numpy as np
+        from PIL import Image
+        from pipeline import run_sam, run_dino, draw_predictions
 
-            web_app = FastAPI()
-            web_app.add_middleware(
-                CORSMiddleware,
-                allow_origins=["*"],
-                allow_methods=["*"],
-                allow_headers=["*"],
+        web_app = FastAPI()
+        web_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+        @web_app.post("/predict")
+        async def predict(file: UploadFile = File(...)):
+            content = await file.read()
+            image   = Image.open(io.BytesIO(content)).convert("RGB")
+
+            sam_output, image_resized = run_sam(self.sam3, image=image)
+
+            if sam_output["masks"].shape[0] == 0:
+                return {"error": "No cranberries detected"}
+
+            predictions, _ = run_dino(
+                self.dino, self.clf, image_resized,
+                sam_output["masks"],
+                sam_output["boxes"],
+                sam_output["scores"],
+                device=self.device,
             )
 
-            @web_app.post("/predict")
-            async def predict(file: UploadFile = File(...)):
-                content = await file.read()
-                image   = Image.open(io.BytesIO(content)).convert("RGB")
+            annotated = draw_predictions(image_resized, predictions, sam_output["masks"])
+            _, buf    = cv2.imencode(".png", cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
+            b64       = base64.b64encode(buf).decode()
 
-                sam_output, image_resized = run_sam(self.sam3, image=image)
+            n_rot  = sum(1 for p in predictions if p["predicted_class"] == 0)
+            n_ripe = len(predictions) - n_rot
 
-                if sam_output["masks"].shape[0] == 0:
-                    return {"error": "No cranberries detected"}
-
-                predictions, _ = run_dino(
-                    self.dino, self.clf, image_resized,
-                    sam_output["masks"],
-                    sam_output["boxes"],
-                    sam_output["scores"],
-                    device=self.device,
-                )
-
-                annotated = draw_predictions(image_resized, predictions, sam_output["masks"])
-                _, buf    = cv2.imencode(".png", cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
-                b64       = base64.b64encode(buf).decode()
-
-                n_rot  = sum(1 for p in predictions if p["predicted_class"] == 0)
-                n_ripe = len(predictions) - n_rot
-
-                return {
-                    "annotated_image": b64,
-                    "image_size":      list(image_resized.size),
-                    "cranberries":     [
-                        {**{k: v for k, v in p.items() if k != "all_class_probs"},
-                        "all_class_probs": p["all_class_probs"].tolist()}
-                        for p in predictions
-                    ],
-                    "summary": {
-                        "total":   len(predictions),
-                        "n_rot":   n_rot,
-                        "n_ripe":  n_ripe,
-                        "pct_rot": round(n_rot / max(len(predictions), 1) * 100, 1),
-                    }
+            return {
+                "annotated_image": b64,
+                "image_size":      list(image_resized.size),
+                "cranberries":     [
+                    {**{k: v for k, v in p.items() if k != "all_class_probs"},
+                    "all_class_probs": p["all_class_probs"].tolist()}
+                    for p in predictions
+                ],
+                "summary": {
+                    "total":   len(predictions),
+                    "n_rot":   n_rot,
+                    "n_ripe":  n_ripe,
+                    "pct_rot": round(n_rot / max(len(predictions), 1) * 100, 1),
                 }
-            return web_app
+            }
+        return web_app

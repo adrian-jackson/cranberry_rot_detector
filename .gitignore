@@ -2,8 +2,8 @@
 backend/models/*.pth
 backend/models/*.pkl
 backend/models/*.npy
-backend/models/*.pt
-backend/models/*.json
+backend/models/sam3_weights/*.pt
+backend/models/sam3_weights/*.json
 
 # Python
 __pycache__/
