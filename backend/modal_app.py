@@ -62,7 +62,7 @@ image = (
         "/usr/local/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz",
     )
     # Also bundle your pipeline.py so the container can import it
-    .add_local_file("pipeline.py", "/usr/local/pipeline.py")
+    .add_local_file("backend/pipeline.py", "/usr/local/pipeline.py")
 )
 
 # ── Mount your model files ────────────────────────────────────────────────
