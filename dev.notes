@@ -1,3 +1,13 @@
 use to re-deploy modal_app: python -m modal deploy backend/modal_app.py
 backend is all in modal, but included in this package for future revisions.
 model endpoint is https://adrian-jackson--cranberry-inspector-cranberryinspector-predict.modal.run
+
+One-time setup (before first deploy after the API-key change):
+  modal secret create cranberry-api-key API_KEY=<paste a generated key>
+  # generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+Share that same key value with whoever you want to have access — they paste it
+into the "access key" prompt the frontend shows on first visit (it's stored in
+their browser's localStorage, not baked into the Vercel build).
+
+If SAM3 needs to be updated later, bump SAM3_COMMIT in backend/modal_app.py to
+the new commit SHA from https://github.com/facebookresearch/sam3 and redeploy.

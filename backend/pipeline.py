@@ -8,7 +8,7 @@ cranberry image and returns per-berry rot/ripe predictions.
 
 Typical usage
 -------------
-    processor = load_sam3("path/to/sam3_root")
+    processor = load_sam3()
     dino      = load_dino("path/to/backbone.pth")
     clf       = load_svm("path/to/svm_clf.pkl")
 
@@ -55,6 +55,12 @@ ROT_THRESHOLD = 0.55
 # proportionally to stay within GPU memory limits.
 SAM_MAX_DIM = 1024
 
+# Text prompts tried against SAM3, in order, when an earlier prompt in the
+# list finds zero masks. "cranberry" is tried first since it's the most
+# specific; the rest are broader fallbacks for photos/lighting where SAM3
+# doesn't recognize the specific term.
+SAM_FALLBACK_PROMPTS = ["cranberry", "fruit", "berry"]
+
 # ImageNet normalisation required by DINOv2 (pretrained on ImageNet).
 _IMAGENET_MEAN = [0.485, 0.456, 0.406]
 _IMAGENET_STD  = [0.229, 0.224, 0.225]
@@ -76,24 +82,25 @@ CLASS_COLORS = {0: (255, 80, 80), 1: (80, 255, 80)}
 # Model loading
 # ─────────────────────────────────────────────────────────────────────────
 
-def load_sam3(sam3_root: str | Path,
-              conf_thresh: float = SAM_CONF_THRESH,
+def load_sam3(conf_thresh: float = SAM_CONF_THRESH,
               ckpt_path = None,
               device: str = "cuda") -> Sam3Processor:
     """
     Loads the SAM3 image segmentation model.
 
+    The BPE vocab file ships as package-data inside the installed ``sam3``
+    package (``sam3/assets/bpe_simple_vocab_16e6.txt.gz``), so its path is
+    resolved from the package itself rather than a local checkout.
+
     Args:
-        sam3_root:   Root directory of the sam3 package, which must contain
-                     ``sam3/assets/bpe_simple_vocab_16e6.txt.gz``.
         conf_thresh: Minimum confidence for a detected mask to be kept.
         device:      ``'cuda'`` or ``'cpu'``.
 
     Returns:
         A ``Sam3Processor`` instance ready for inference.
     """
-    sam3_root = Path(sam3_root)
-    bpe_path  = sam3_root / "sam3" / "assets" / "bpe_simple_vocab_16e6.txt.gz"
+    import sam3
+    bpe_path = Path(sam3.__file__).resolve().parent / "assets" / "bpe_simple_vocab_16e6.txt.gz"
 
     if not bpe_path.exists():
         raise FileNotFoundError(f"SAM3 BPE file not found: {bpe_path}")
@@ -147,6 +154,7 @@ def load_svm(clf_path: str | Path):
 def run_sam(processor: Sam3Processor,
             image: Image.Image | None = None,
             image_path: str | Path | None = None,
+            prompt: str = "cranberry",
             ) -> tuple[dict, Image.Image]:
     """
     Runs SAM3 on an image and returns per-berry masks, boxes, and scores.
@@ -159,6 +167,11 @@ def run_sam(processor: Sam3Processor,
         processor:  SAM3 processor returned by ``load_sam3``.
         image:      PIL image (RGB).
         image_path: Path to an image file on disk.
+        prompt:     Text prompt given to SAM3's text-prompted segmentation.
+                    Callers that want a fallback-prompt retry (see
+                    ``SAM_FALLBACK_PROMPTS``) should call this repeatedly
+                    with different prompts rather than looping internally,
+                    since each call needs a fresh ``image``/``image_path``.
 
     Returns:
         A tuple of:
@@ -181,7 +194,7 @@ def run_sam(processor: Sam3Processor,
 
     inference_state = processor.set_image(image)
     processor.reset_all_prompts(inference_state)
-    raw = processor.set_text_prompt(state=inference_state, prompt="cranberry")
+    raw = processor.set_text_prompt(state=inference_state, prompt=prompt)
 
     return {
         "masks":  raw["masks"],   # [N, 1, H, W] bool tensor
@@ -314,6 +327,7 @@ def draw_predictions(image: Image.Image,
                      predictions: list[dict],
                      masks: torch.Tensor,
                      alpha: float = 0.3,
+                     label_caption: str | None = None,
                      ) -> np.ndarray:
     """
     Renders SAM masks and prediction labels onto the image.
@@ -326,11 +340,14 @@ def draw_predictions(image: Image.Image,
     and a labelled bounding box is drawn at the top of each berry.
 
     Args:
-        image:       PIL image at the same resolution SAM used.
-        predictions: List of prediction dicts from ``run_dino``.
-        masks:       SAM mask tensor [N, 1, H, W].
-        alpha:       Opacity of the mask colour overlay (0 = invisible,
-                     1 = fully opaque). Default 0.3.
+        image:         PIL image at the same resolution SAM used.
+        predictions:   List of prediction dicts from ``run_dino``.
+        masks:         SAM mask tensor [N, 1, H, W].
+        alpha:         Opacity of the mask colour overlay (0 = invisible,
+                       1 = fully opaque). Default 0.3.
+        label_caption: Optional text (e.g. a detected barcode/label value
+                       from ``read_label``) drawn as a banner across the
+                       top of the image. Omitted when ``None``.
 
     Returns:
         Annotated image as a uint8 numpy array (RGB).
@@ -380,7 +397,17 @@ def draw_predictions(image: Image.Image,
                     text, (x1 + 4, y1 - 5),
                     font, scale, (255, 255, 255), thickness)
 
-    return img_np.astype(np.uint8)
+    img_np = img_np.astype(np.uint8)
+
+    if label_caption:
+        font, scale, thickness = cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
+        (tw, th), _ = cv2.getTextSize(label_caption, font, scale, thickness)
+        banner_h = th + 16
+        cv2.rectangle(img_np, (0, 0), (W, banner_h), (0, 0, 0), cv2.FILLED)
+        cv2.putText(img_np, label_caption, (8, banner_h - 10),
+                    font, scale, (255, 255, 255), thickness)
+
+    return img_np
 
 
 def save_annotated_image(image: Image.Image,
@@ -405,6 +432,44 @@ def save_annotated_image(image: Image.Image,
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Label / barcode reading
+# ─────────────────────────────────────────────────────────────────────────
+
+def read_label(image: Image.Image) -> dict:
+    """
+    Best-effort read of any printed label or barcode/QR code in the image.
+
+    Tries barcode/QR decoding first (fast and precise when present), then
+    falls back to free-text OCR. Never raises — a missing or unreadable
+    label just yields ``{"type": "none", "value": ""}`` so this can never
+    block the core rot/ripe classification.
+
+    Args:
+        image: PIL image (RGB) to scan.
+
+    Returns:
+        A dict ``{"type": "barcode" | "text" | "none", "value": str}``.
+    """
+    try:
+        from pyzbar.pyzbar import decode as zbar_decode
+        codes = zbar_decode(image)
+        if codes:
+            return {"type": "barcode", "value": codes[0].data.decode("utf-8", "ignore")}
+    except Exception:
+        pass
+
+    try:
+        import pytesseract
+        text = pytesseract.image_to_string(image).strip()
+        if text:
+            return {"type": "text", "value": text}
+    except Exception:
+        pass
+
+    return {"type": "none", "value": ""}
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Quick local test
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -415,7 +480,6 @@ def _run_local_test():
     """
     # ── Paths — edit these to match your local layout ─────────────────────
     BASE_DIR   = Path(__file__).resolve().parent.parent
-    SAM3_ROOT  = BASE_DIR.parent.parent / "sam3"
     DINO_PATH  = (BASE_DIR / "training" / "DINO_grid_models"
                            / "ft-patch_mean_ru-3_bl-4_tmp-0.07_ep-30"
                            / "backbone.pth")
@@ -430,7 +494,7 @@ def _run_local_test():
 
     # ── Load models ───────────────────────────────────────────────────────
     print("Loading models...")
-    sam3 = load_sam3(SAM3_ROOT, device=device)
+    sam3 = load_sam3(device=device)
     dino = load_dino(DINO_PATH,  device=device)
     clf  = load_svm(CLF_PATH)
 

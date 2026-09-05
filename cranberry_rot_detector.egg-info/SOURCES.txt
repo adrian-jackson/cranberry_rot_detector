@@ -1,0 +1,10 @@
+README.md
+pyproject.toml
+backend/__init__.py
+backend/modal_app.py
+backend/pipeline.py
+cranberry_rot_detector.egg-info/PKG-INFO
+cranberry_rot_detector.egg-info/SOURCES.txt
+cranberry_rot_detector.egg-info/dependency_links.txt
+cranberry_rot_detector.egg-info/requires.txt
+cranberry_rot_detector.egg-info/top_level.txt
