@@ -124,7 +124,7 @@ the page lets you (or them) re-enter it if it's ever rotated.
 
 ## Using the API directly
 
-All requests (both endpoints below) require an `X-API-Key` header. Contact me for this.
+Please contact me for the modal backend URL - this is kept private for safety. All requests (both endpoints below) require an `X-API-Key` header. Contact me for this as well.
 
 ### `POST /predict`
 
@@ -135,7 +135,7 @@ All requests (both endpoints below) require an `X-API-Key` header. Contact me fo
 **curl:**
 
 ```bash
-curl -X POST "https://your-modal-endpoint.modal.run/predict" \
+curl -X POST "modal-backend.modal.run/predict" \
   -H "X-API-Key: $CRANBERRY_API_KEY" \
   -F "file=@photo.jpg"
 ```
@@ -146,7 +146,7 @@ curl -X POST "https://your-modal-endpoint.modal.run/predict" \
 import os
 import requests
 
-API_URL = "https://your-modal-endpoint.modal.run/predict"
+API_URL = "modal-backend.modal.run/predict"
 API_KEY = os.environ["CRANBERRY_API_KEY"]  # never hardcode the key in source
 
 with open("photo.jpg", "rb") as f:
@@ -202,6 +202,7 @@ There are two endpoints:
 - **`POST /predict/batch`** — multiple images in one request, repeated
   `files` fields (e.g. `-F "files=@a.jpg" -F "files=@b.jpg"`). Processes them
   sequentially server-side and returns:
+
   ```jsonc
   {
     "results": [
@@ -210,6 +211,7 @@ There are two endpoints:
     ]
   }
   ```
+
   Each entry includes a `filename` field (echoing what you sent) so you can
   correlate results back to your inputs. **A batch request is capped at 25
   files** (`MAX_BATCH_SIZE` in `backend/modal_app.py`) — send more than that
