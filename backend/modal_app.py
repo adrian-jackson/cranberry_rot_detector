@@ -54,6 +54,7 @@ app = modal.App("cranberry-inspector", image=image)
     volumes={"/models": model_volume},
     scaledown_window=300,      # keep warm for 5 min between requests
     secrets=[modal.Secret.from_name("cranberry-api-key")],
+    timeout=600,               # generous enough for a full /predict/batch request
 )
 class CranberryInspector:
 
@@ -64,7 +65,9 @@ class CranberryInspector:
         import pickle
         import sys
         sys.path.insert(0, "/usr/local")         # make pipeline.py importable
-        from pipeline import load_sam3, load_dino, load_svm
+        from pipeline import load_sam3, load_dino, load_svm, set_seed
+
+        set_seed()   # reproducible outputs across requests/deploys
 
         device = "cuda"
 
@@ -97,14 +100,14 @@ class CranberryInspector:
             allow_headers=["*"],
         )
 
+        MAX_BATCH_SIZE = 25   # keep a single /predict/batch request well inside the class timeout
+
         def require_api_key(x_api_key: str = Header(default=None)):
             if x_api_key != os.environ["API_KEY"]:
                 raise HTTPException(status_code=401, detail="Missing or invalid API key")
 
-        @web_app.post("/predict")
-        async def predict(file: UploadFile = File(...), _=Depends(require_api_key)):
-            content = await file.read()
-            image   = Image.open(io.BytesIO(content)).convert("RGB")
+        def predict_one(image):
+            """Runs the full pipeline on one already-decoded PIL image."""
             cran_error = 0
 
             sam_output, image_resized, sam_prompt_used = None, image, None
@@ -155,4 +158,38 @@ class CranberryInspector:
                     "pct_rot": round(n_rot / max(len(predictions), 1) * 100, 1),
                 }
             }
+
+        def decode_image(content: bytes) -> Image.Image:
+            try:
+                return Image.open(io.BytesIO(content)).convert("RGB")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Could not read image: {e}")
+
+        @web_app.post("/predict")
+        async def predict(file: UploadFile = File(...), _=Depends(require_api_key)):
+            image = decode_image(await file.read())
+            return predict_one(image)
+
+        @web_app.post("/predict/batch")
+        async def predict_batch(files: list[UploadFile] = File(...), _=Depends(require_api_key)):
+            if len(files) > MAX_BATCH_SIZE:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Batch too large ({len(files)} files) — max {MAX_BATCH_SIZE} per request. Split into multiple requests.",
+                )
+
+            results = []
+            for f in files:
+                try:
+                    image = decode_image(await f.read())
+                    result = predict_one(image)
+                except HTTPException as e:
+                    # One bad file shouldn't fail the whole batch — record it
+                    # and keep processing the rest.
+                    result = {"error": 1, "detail": e.detail}
+                result["filename"] = f.filename
+                results.append(result)
+
+            return {"results": results}
+
         return web_app

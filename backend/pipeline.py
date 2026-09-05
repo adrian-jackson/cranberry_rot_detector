@@ -23,7 +23,11 @@ Typical usage
 
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# Must be set before any CUDA context is created for set_seed(strict=True)'s
+# torch.use_deterministic_algorithms() to take effect; harmless otherwise.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
+import random
 from pathlib import Path
 
 import cv2
@@ -61,6 +65,10 @@ SAM_MAX_DIM = 1024
 # doesn't recognize the specific term.
 SAM_FALLBACK_PROMPTS = ["cranberry", "fruit", "berry"]
 
+# Seed used by set_seed() at model-load time so repeated runs on the same
+# image are reproducible.
+SEED = 0
+
 # ImageNet normalisation required by DINOv2 (pretrained on ImageNet).
 _IMAGENET_MEAN = [0.485, 0.456, 0.406]
 _IMAGENET_STD  = [0.229, 0.224, 0.225]
@@ -76,6 +84,49 @@ CLASS_NAMES = {0: "rot", 1: "ripe"}
 
 # Overlay colours (RGB) for each class.
 CLASS_COLORS = {0: (255, 80, 80), 1: (80, 255, 80)}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Reproducibility
+# ─────────────────────────────────────────────────────────────────────────
+
+def set_seed(seed: int = SEED, strict: bool = False) -> None:
+    """
+    Seeds every source of randomness this pipeline touches, so the same
+    input image produces the same output on repeated runs. Call this once,
+    after loading models and before running inference.
+
+    In practice, SAM3 and DINOv2 are already deterministic at inference —
+    both run in eval() mode (no active dropout) and neither samples from a
+    distribution when producing masks or features. This seeds them anyway
+    as a defensive measure, in case a future change (or a code path this
+    hasn't been audited against) introduces data-dependent randomness.
+
+    The real source of run-to-run variation is GPU numerical
+    non-determinism: cuDNN can pick a different convolution algorithm
+    between runs, and their floating-point summation order differs
+    slightly. That's usually negligible, but can occasionally flip a
+    decision sitting right on SAM_CONF_THRESH or ROT_THRESHOLD.
+
+    Args:
+        seed:   Seed applied to Python's ``random``, NumPy, and PyTorch.
+        strict: If True, also forces PyTorch to use a deterministic GPU
+                kernel wherever one exists (``torch.use_deterministic_algorithms``).
+                This gets closer to bit-exact reproducibility, but some ops
+                have no deterministic GPU implementation and will raise a
+                RuntimeError instead of silently running non-deterministically.
+                Off by default so a stray unsupported op can't take down the
+                API — turn it on for offline validation/precision testing.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    if strict:
+        torch.use_deterministic_algorithms(True)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -491,6 +542,7 @@ def _run_local_test():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    set_seed()
 
     # ── Load models ───────────────────────────────────────────────────────
     print("Loading models...")
