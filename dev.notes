@@ -11,3 +11,23 @@ their browser's localStorage, not baked into the Vercel build).
 
 If SAM3 needs to be updated later, bump SAM3_COMMIT in backend/modal_app.py to
 the new commit SHA from https://github.com/facebookresearch/sam3 and redeploy.
+
+If a deploy throws ModuleNotFoundError for something SAM3-related after a
+SAM3_COMMIT bump: don't assume a package is training-only just because it
+"sounds" like it (pycocotools broke this exact way once already — it's
+imported unconditionally by sam3.model.sam3_video_base even though we only
+use the image path, because model_builder.py imports the whole model
+package including video/tracking code). sam3's own pyproject.toml only
+declares timm/tqdm/ftfy/regex/iopath/typing_extensions/huggingface_hub as
+dependencies — anything else needed has to be listed by hand in both
+backend/modal_app.py and pyproject.toml.
+
+To check what's actually needed before guessing: clone SAM3 locally, then
+walk the AST of every file reachable from `sam3.model_builder` and
+`sam3.model.sam3_image_processor` (the two things backend/pipeline.py
+imports), collecting only imports at module top level (not inside function
+bodies, which are deferred — that's how a stray `import decord` inside a
+video-loading function shows up as "reachable" but isn't actually required).
+Cross-reference the result against what's currently pip_install()'d. This is
+how the pycocotools/triton/setuptools gap above was actually found and
+confirmed, rather than guessed at.

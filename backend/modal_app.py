@@ -32,10 +32,30 @@ image = (
         "psutil",
         "pytesseract",
         "pyzbar",
+        "setuptools",       # provides pkg_resources — sam3.model_builder uses
+                            # pkg_resources.resource_filename() unconditionally
+        "pycocotools",      # sam3.model.sam3_video_base (pulled in by
+                            # model_builder even though we only use the image
+                            # path) does `from sam3.train.masks_ops import
+                            # rle_encode`, and that module does `import
+                            # pycocotools.mask` at the top — unconditional,
+                            # not training-only despite living under train/.
+        "triton",           # sam3/model/edt.py does `import triton` at module
+                            # top level; reachable from model_builder's import
+                            # chain. Usually ships as a transitive dep of
+                            # torch's Linux CUDA wheel anyway, but pin it
+                            # explicitly rather than rely on that.
     )
     # Install SAM3 straight from the upstream GitHub repo — it's a properly
     # packaged pip module (pyproject.toml, package-data includes the BPE
-    # vocab asset), so no local mount/copy is needed.
+    # vocab asset), so no local mount/copy is needed. Its own pyproject.toml
+    # declares timm/tqdm/ftfy/regex/iopath/typing_extensions/huggingface_hub
+    # as base dependencies, so pip resolves those automatically here — but
+    # pycocotools and triton above are NOT declared there (a gap in sam3's
+    # own packaging), which is exactly what broke this deploy once already.
+    # If a future SAM3_COMMIT bump throws another ModuleNotFoundError, re-run
+    # the reachability trace (see dev.notes) rather than assuming a package
+    # is unused just because it's not in sam3's declared dependencies.
     .pip_install(f"sam3 @ git+https://github.com/facebookresearch/sam3.git@{SAM3_COMMIT}")
     # Bundle your pipeline.py so the container can import it
     .add_local_file("backend/pipeline.py", "/usr/local/pipeline.py")
