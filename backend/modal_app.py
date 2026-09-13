@@ -128,6 +128,8 @@ class CranberryInspector:
 
         def require_api_key(x_api_key: str = Header(default=None)):
             if x_api_key != os.environ["API_KEY"]:
+                print('received: ', x_api_key)
+                print('expected: <key>',>)
                 raise HTTPException(status_code=401, detail="Missing or invalid API key")
 
         def predict_one(image):
