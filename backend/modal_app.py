@@ -75,6 +75,10 @@ app = modal.App("cranberry-inspector", image=image)
     scaledown_window=300,      # keep warm for 5 min between requests
     secrets=[modal.Secret.from_name("cranberry-api-key")],
     timeout=600,               # generous enough for a full /predict/batch request
+    startup_timeout=300,       # bounds @modal.enter()/load_models() specifically —
+                               # without this, a stuck container (e.g. load_dino's
+                               # torch.hub.load() hanging on a GitHub fetch) can sit
+                               # indefinitely instead of failing with a clear error.
 )
 class CranberryInspector:
 
