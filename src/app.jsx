@@ -1,9 +1,52 @@
 import { useState, useRef, useCallback } from "react";
+import { getStoredApiKey, setStoredApiKey, clearStoredApiKey } from "./apiKey";
+import { exportResultsZip } from "./export";
 
 const API = import.meta.env.VITE_API_URL || "https://adrian-jackson--cranberry-inspector-cranberryinspector-f-db90e3.modal.run";
 
 const CLASS_COLOR = { 0: "#ff5050", 1: "#50ff50" };
 const CLASS_LABEL = { 0: "Rot", 1: "Ripe" };
+
+const BATCH_CONCURRENCY = 3;
+
+// ── Access key gate ─────────────────────────────────────────────────────────
+function ApiKeyGate({ onSubmit, invalid }) {
+  const [value, setValue] = useState("");
+  return (
+    <div style={styles.page}>
+      <div style={styles.keyGateBox}>
+        <h2 style={{ marginTop: 0 }}>Access key required</h2>
+        <p style={styles.modalText}>
+          This tool is limited to people who've been given a key. Enter yours below —
+          it's saved only in this browser, never sent anywhere except to the API.
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (value.trim()) onSubmit(value.trim());
+          }}
+        >
+          <input
+            type="password"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Access key"
+            style={styles.keyInput}
+            autoFocus
+          />
+          <button type="submit" style={{ ...styles.uploadBtn, width: "100%", marginTop: 12, textAlign: "center" }}>
+            Continue
+          </button>
+        </form>
+        {invalid && (
+          <p style={{ color: "#ff8080", fontSize: 13, marginTop: 12 }}>
+            That key was rejected by the server. Double-check it and try again.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── How-to modal content ───────────────────────────────────────────────────
 function HowToModal({ onClose }) {
@@ -15,7 +58,9 @@ function HowToModal({ onClose }) {
         <p style={styles.modalText}>
           <strong style={{ color: "#e63946" }}>1. Upload a photo</strong> of
           cranberries taken from directly above, in good lighting. The clearer
-          the image, the more accurate the results.
+          the image, the more accurate the results. Or switch to{" "}
+          <strong style={{ color: "#e63946" }}>Folder</strong> mode to process a
+          whole folder of images at once.
         </p>
         <p style={styles.modalText}>
           <strong style={{ color: "#e63946" }}>2. Wait for analysis.</strong> The
@@ -32,6 +77,12 @@ function HowToModal({ onClose }) {
           <strong style={{ color: "#e63946" }}>4. Toggle views.</strong> Use the
           Original / Annotated buttons to switch between the raw photo and the
           annotated overlay.
+        </p>
+        <p style={styles.modalText}>
+          <strong style={{ color: "#e63946" }}>5. Export.</strong> Use the Export
+          button to download a .zip with every annotated image plus a
+          results.xlsx spreadsheet summarizing rot %, ripe %, average DINO
+          confidence, and any detected label/barcode per image.
         </p>
 
         <hr style={{ borderColor: "#333", margin: "16px 0" }} />
@@ -53,7 +104,13 @@ function HowToModal({ onClose }) {
 }
 
 export default function App() {
+  const [apiKey,        setApiKey]        = useState(() => getStoredApiKey());
+  const [keyInvalid,    setKeyInvalid]    = useState(false);
+
+  const [mode,           setMode]          = useState("single"); // "single" | "batch"
+
   const [result,        setResult]        = useState(null);
+  const [fileName,      setFileName]      = useState(null);
   const [originalUrl,   setOriginalUrl]   = useState(null);  // object URL of uploaded file
   const [loading,       setLoading]       = useState(false);
   const [error,         setError]         = useState(null);
@@ -63,7 +120,25 @@ export default function App() {
   const [showHowTo,     setShowHowTo]     = useState(false);
   const imgRef = useRef(null);
 
-  // ── Upload + predict ───────────────────────────────────────────────────
+  const [batchResults,  setBatchResults]  = useState([]);   // [{filename, data, error}]
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0 });
+  const [batchLoading,  setBatchLoading]  = useState(false);
+
+  // ── Auth helper ─────────────────────────────────────────────────────────
+  const authedFetch = useCallback((path, opts = {}) => {
+    return fetch(`${API}${path}`, {
+      ...opts,
+      headers: { ...(opts.headers || {}), "X-API-Key": apiKey },
+    });
+  }, [apiKey]);
+
+  const handleAuthFailure = useCallback(() => {
+    clearStoredApiKey();
+    setApiKey(null);
+    setKeyInvalid(true);
+  }, []);
+
+  // ── Upload + predict (single image) ─────────────────────────────────────
   const handleFile = useCallback(async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -72,6 +147,7 @@ export default function App() {
     // even while the API is running
     const objectUrl = URL.createObjectURL(file);
     setOriginalUrl(objectUrl);
+    setFileName(file.name);
     setShowAnnotated(false);   // start on original while loading
     setLoading(true);
     setError(null);
@@ -82,7 +158,8 @@ export default function App() {
     form.append("file", file);
 
     try {
-      const res  = await fetch(`${API}/predict`, { method: "POST", body: form });
+      const res  = await authedFetch("/predict", { method: "POST", body: form });
+      if (res.status === 401) { handleAuthFailure(); return; }
       const data = await res.json();
       console.log("API response:", data);
 
@@ -90,7 +167,7 @@ export default function App() {
 
       // Backend sets error:1 when no cranberries are detected
       if (data.error === 1) {
-        setError("No cranberries detected. Try a clearer photo taken from directly above.");
+        setError("No cranberries detected, even after retrying with alternate prompts. Try a clearer photo taken from directly above.");
         setLoading(false);
         return;   // keep originalUrl displayed, don't set result
       }
@@ -102,7 +179,57 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authedFetch, handleAuthFailure]);
+
+  // ── Upload + predict (folder batch) ─────────────────────────────────────
+  const handleFolder = useCallback(async (e) => {
+    const files = Array.from(e.target.files).filter(f => f.type.startsWith("image/"));
+    if (files.length === 0) return;
+
+    setError(null);
+    setBatchResults([]);
+    setBatchProgress({ done: 0, total: files.length });
+    setBatchLoading(true);
+
+    const results = new Array(files.length);
+    let nextIndex = 0;
+    let authFailed = false;
+
+    async function worker() {
+      while (nextIndex < files.length && !authFailed) {
+        const idx  = nextIndex++;
+        const file = files[idx];
+        try {
+          const form = new FormData();
+          form.append("file", file);
+          const res = await authedFetch("/predict", { method: "POST", body: form });
+          if (res.status === 401) { authFailed = true; return; }
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+          results[idx] = {
+            filename: file.name,
+            data: data.error === 1 ? null : data,
+            error: data.error === 1 ? "No cranberries detected" : null,
+          };
+        } catch (err) {
+          results[idx] = { filename: file.name, data: null, error: err.message };
+        }
+        setBatchProgress(p => ({ ...p, done: p.done + 1 }));
+      }
+    }
+
+    const workers = Array.from({ length: Math.min(BATCH_CONCURRENCY, files.length) }, worker);
+    await Promise.all(workers);
+
+    if (authFailed) {
+      handleAuthFailure();
+      setBatchLoading(false);
+      return;
+    }
+
+    setBatchResults(results);
+    setBatchLoading(false);
+  }, [authedFetch, handleAuthFailure]);
 
   // ── Mouse move over image: find berry under cursor ─────────────────────
   const handleMouseMove = useCallback((e) => {
@@ -126,26 +253,84 @@ export default function App() {
 
   const hoveredBerry = result?.cranberries.find(c => c.mask_index === hovered) ?? null;
 
+  const exportSingle = useCallback(() => {
+    if (!result || !fileName) return;
+    exportResultsZip([{ filename: fileName, data: result, error: null }]);
+  }, [result, fileName]);
+
+  const exportBatch = useCallback(() => {
+    if (batchResults.length === 0) return;
+    exportResultsZip(batchResults);
+  }, [batchResults]);
+
+  // ── Gate everything behind an access key ────────────────────────────────
+  if (!apiKey) {
+    return (
+      <ApiKeyGate
+        invalid={keyInvalid}
+        onSubmit={(key) => {
+          setStoredApiKey(key);
+          setApiKey(key);
+          setKeyInvalid(false);
+        }}
+      />
+    );
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
       <h1 style={styles.title}>Cranberry Rot Detector</h1>
 
+      {/* Mode toggle */}
+      <div style={styles.toggleRow}>
+        <button
+          style={{ ...styles.toggleBtn, ...(mode === "single" ? styles.toggleActive : {}) }}
+          onClick={() => setMode("single")}
+        >
+          Single Image
+        </button>
+        <button
+          style={{ ...styles.toggleBtn, ...(mode === "batch" ? styles.toggleActive : {}) }}
+          onClick={() => setMode("batch")}
+        >
+          Folder
+        </button>
+      </div>
+
       {/* Controls row */}
       <div style={styles.controls}>
-        <label style={styles.uploadBtn}>
-          {loading ? "Analysing…" : "Upload Image"}
-          <input type="file" accept="image/*"
-                 onChange={handleFile} style={{ display: "none" }}
-                 disabled={loading} />
-        </label>
+        {mode === "single" ? (
+          <label style={styles.uploadBtn}>
+            {loading ? "Analysing…" : "Upload Image"}
+            <input type="file" accept="image/*"
+                   onChange={handleFile} style={{ display: "none" }}
+                   disabled={loading} />
+          </label>
+        ) : (
+          <label style={styles.uploadBtn}>
+            {batchLoading ? "Analysing…" : "Choose Folder"}
+            <input type="file" accept="image/*" multiple
+                   webkitdirectory="" directory=""
+                   onChange={handleFolder} style={{ display: "none" }}
+                   disabled={batchLoading} />
+          </label>
+        )}
 
-        {/* How-to button — shown after first upload */}
-        {(result || originalUrl) && (
-          <button style={styles.howToBtn} onClick={() => setShowHowTo(true)}>
-            ? How to use
+        {mode === "single" && result && (
+          <button style={styles.howToBtn} onClick={exportSingle}>
+            Export
           </button>
         )}
+        {mode === "batch" && batchResults.length > 0 && !batchLoading && (
+          <button style={styles.howToBtn} onClick={exportBatch}>
+            Export ({batchResults.length})
+          </button>
+        )}
+
+        <button style={styles.howToBtn} onClick={() => setShowHowTo(true)}>
+          ? How to use
+        </button>
       </div>
 
       {error && (
@@ -154,8 +339,46 @@ export default function App() {
         </div>
       )}
 
-      {/* Image area — show original while loading or when no results yet */}
-      {(originalUrl || result) && (
+      {/* ── Batch mode ─────────────────────────────────────────────────── */}
+      {mode === "batch" && (batchLoading || batchResults.length > 0) && (
+        <div style={styles.batchBox}>
+          {batchLoading && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ marginBottom: 6, fontSize: 13, color: "#aaa" }}>
+                Processing {batchProgress.done} / {batchProgress.total}…
+              </div>
+              <div style={styles.progressTrack}>
+                <div style={{
+                  ...styles.progressFill,
+                  width: `${(batchProgress.done / Math.max(batchProgress.total, 1)) * 100}%`,
+                }} />
+              </div>
+            </div>
+          )}
+
+          {batchResults.length > 0 && (
+            <div style={styles.berryList}>
+              {batchResults.map((r, i) => (
+                <div key={i} style={styles.batchRow}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {r.filename}
+                  </span>
+                  {r.data ? (
+                    <span style={{ color: r.data.summary.pct_rot > 20 ? "#ff5050" : "#50ff50" }}>
+                      {r.data.summary.pct_rot}% rot
+                    </span>
+                  ) : (
+                    <span style={{ color: "#ff8080", fontSize: 12 }}>{r.error}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Single-image mode ──────────────────────────────────────────── */}
+      {mode === "single" && (originalUrl || result) && (
         <div style={styles.layout}>
 
           {/* Image + toggle */}
@@ -240,6 +463,12 @@ export default function App() {
               <Stat label="Rot"   value={result.summary.n_rot}  color="#ff5050" />
               <Stat label="% Rot" value={`${result.summary.pct_rot}%`}
                     color={result.summary.pct_rot > 20 ? "#ff5050" : "#50ff50"} />
+              {result.detected_label && result.detected_label.type !== "none" && (
+                <Stat
+                  label={result.detected_label.type === "barcode" ? "Barcode" : "Detected label"}
+                  value={result.detected_label.value}
+                />
+              )}
 
               <h3 style={{ marginTop: 24, marginBottom: 8 }}>Per-Berry</h3>
               <div style={styles.berryList}>
@@ -272,17 +501,20 @@ export default function App() {
                   );
                 })}
               </div>
-
-              <button
-                style={{ ...styles.howToBtn, marginTop: 16, width: "100%" }}
-                onClick={() => setShowHowTo(true)}
-              >
-                ? How to use
-              </button>
             </div>
           )}
         </div>
       )}
+
+      {/* Change access key */}
+      <div style={{ textAlign: "center", marginTop: 32 }}>
+        <button
+          style={styles.changeKeyBtn}
+          onClick={() => { clearStoredApiKey(); setApiKey(null); }}
+        >
+          Change access key
+        </button>
+      </div>
 
       {/* How-to modal */}
       {showHowTo && <HowToModal onClose={() => setShowHowTo(false)} />}
@@ -315,7 +547,7 @@ function Stat({ label, value, color = "white" }) {
     <div style={{ display: "flex", justifyContent: "space-between",
                   padding: "6px 0", borderBottom: "1px solid #2a2a2a" }}>
       <span style={{ color: "#aaa" }}>{label}</span>
-      <span style={{ color, fontWeight: "bold" }}>{value}</span>
+      <span style={{ color, fontWeight: "bold", textAlign: "right", marginLeft: 12 }}>{value}</span>
     </div>
   );
 }
@@ -343,6 +575,11 @@ const styles = {
     border: "1px solid #444", borderRadius: 8,
     cursor: "pointer", fontSize: 14, fontWeight: "normal",
   },
+  changeKeyBtn: {
+    padding: "6px 14px", background: "transparent", color: "#666",
+    border: "none", borderRadius: 6,
+    cursor: "pointer", fontSize: 12, textDecoration: "underline",
+  },
   errorBox: {
     maxWidth: 500, margin: "0 auto 24px",
     background: "#2a1010", border: "1px solid #ff5050",
@@ -354,7 +591,7 @@ const styles = {
     flexWrap: "wrap", justifyContent: "center",
   },
   toggleRow: {
-    display: "flex", gap: 8,
+    display: "flex", gap: 8, justifyContent: "center", marginBottom: 16,
   },
   toggleBtn: {
     padding: "6px 18px", background: "#222", color: "#aaa",
@@ -394,6 +631,32 @@ const styles = {
     cursor: "default", display: "flex",
     justifyContent: "space-between", alignItems: "center",
     fontSize: 13, transition: "background 0.15s, outline 0.15s",
+  },
+  batchBox: {
+    maxWidth: 500, margin: "0 auto 24px",
+    background: "#1a1a1a", borderRadius: 8, padding: 20,
+  },
+  progressTrack: {
+    background: "#333", borderRadius: 4, height: 8, overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%", background: "#e63946", transition: "width 0.2s",
+  },
+  batchRow: {
+    padding: "6px 10px", marginBottom: 4, borderRadius: 4,
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+    gap: 10, fontSize: 13, background: "#222",
+  },
+  // ── Access key gate ─────────────────────────────────────────────────────
+  keyGateBox: {
+    maxWidth: 400, margin: "10vh auto 0",
+    background: "#1a1a1a", border: "1px solid #333",
+    borderRadius: 12, padding: 28,
+  },
+  keyInput: {
+    width: "100%", padding: "10px 14px", fontSize: 15,
+    background: "#111", border: "1px solid #444", borderRadius: 8,
+    color: "white", boxSizing: "border-box",
   },
   // ── How-to modal ──────────────────────────────────────────────────────
   modalOverlay: {

@@ -13,10 +13,15 @@ scikit-learn>=1.4.0            # SVM pipeline (StandardScaler + SVC)
 huggingface-hub>=0.23.0
 
 # ── SAM3 ──────────────────────────────────────────────────────────────────
-# sam3 is not on PyPI — install from source:
-#   pip install -e /path/to/sam3
-# or if published to a git repo:
-#   pip install git+https://github.com/yourname/sam3.git
+# sam3 is not on PyPI — install from the upstream GitHub repo:
+#   pip install git+https://github.com/facebookresearch/sam3.git
+
+# ── Label / barcode reading (read_label in pipeline.py) ────────────────────
+# pytesseract also requires the tesseract-ocr binary on PATH:
+#   Windows: https://github.com/UB-Mannheim/tesseract/wiki
+#   Debian/Ubuntu: apt-get install tesseract-ocr libzbar0
+pytesseract>=0.3.10
+pyzbar>=0.1.9
 
 # ── Standard library (no install needed) ──────────────────────────────────
 # pathlib, pickle, os, io, base64 — all built-in
