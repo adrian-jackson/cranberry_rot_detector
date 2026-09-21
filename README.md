@@ -146,21 +146,68 @@ curl -X POST "modal-backend.modal.run/predict" \
 import os
 import requests
 
-API_URL = "modal-backend.modal.run/predict"
-API_KEY = os.environ["CRANBERRY_API_KEY"]  # never hardcode the key in source
+API_URL = "https://adrian-jackson--cranberry-inspector-cranberryinspector-f-db90e3.modal.run/predict"
+API_KEY = <api key>
 
-with open("photo.jpg", "rb") as f:
+with open(r"C:\Users\Adria\Documents\github\cranberry_algorithms\cranberry_algorithms\src\cranberry_algorithms\raw_data\jpg\1.JPG", "rb") as f:
     resp = requests.post(
         API_URL,
         headers={"X-API-Key": API_KEY},
         files={"file": f},
     )
+print(repr(resp.text))
+print(repr(API_KEY))
 resp.raise_for_status()
 data = resp.json()
 print(data["summary"])
 ```
 
-**Response shape:**
+### `POST /predict/batch`
+
+Same idea, but with repeated `files` fields (up to `MAX_BATCH_SIZE` — currently 25 — per request) instead of a single `file`.
+
+**curl:**
+
+```bash
+curl -X POST "https://your-modal-endpoint.modal.run/predict/batch" \
+  -H "X-API-Key: $CRANBERRY_API_KEY" \
+  -F "files=@photo1.jpg" \
+  -F "files=@photo2.jpg" \
+  -F "files=@photo3.jpg"
+```
+
+**Python:**
+
+```python
+import os
+import requests
+
+API_URL = "https://your-modal-endpoint.modal.run/predict/batch"
+API_KEY = os.environ["CRANBERRY_API_KEY"]  # best practice to not hardcode this - but you can..
+
+image_paths = ["photo1.jpg", "photo2.jpg", "photo3.jpg"] #if you have a folder, use os.listdir()
+files = [("files", open(p, "rb")) for p in image_paths]
+
+try:
+    resp = requests.post(
+        API_URL,
+        headers={"X-API-Key": API_KEY},
+        files=files,
+    )
+finally:
+    for _, f in files:
+        f.close()
+
+resp.raise_for_status()
+data = resp.json()
+for result in data["results"]:
+    if result["error"]:
+        print(result["filename"], "->", result.get("detail", "no cranberries detected"))
+    else:
+        print(result["filename"], "->", f"{result['summary']['pct_rot']}% rot")
+```
+
+**Response shape (`/predict` — a batch response wraps one of these per file in `results: [...]`):**
 
 ```jsonc
 {
@@ -195,7 +242,7 @@ print(data["summary"])
 
 ### Single image vs. batch
 
-There are two endpoints:
+There are two endpoints. Using either with python is the same, except for the endpoint (/predict for single or /predict/batch/ for batch). See above.
 
 - **`POST /predict`** — one image per request, field name `file`. Response
   shape is exactly what's shown above.

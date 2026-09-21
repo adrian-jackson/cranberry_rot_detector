@@ -128,7 +128,7 @@ class CranberryInspector:
 
         def require_api_key(x_api_key: str = Header(default=None)):
             if x_api_key != os.environ["API_KEY"]:
-                raise HTTPException(status_code=401, detail="Missing or invalid API key")
+                raise HTTPException(status_code=401, detail=f"Missing or invalid API key. received key = {x_api_key}.")
 
         def predict_one(image):
             """Runs the full pipeline on one already-decoded PIL image."""
